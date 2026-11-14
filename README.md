@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SEMS — Smart Energy Management System
 
-## Getting Started
+SEMS is a full-stack energy tracking web application. It uses **Next.js 16**, **React 19**, **TypeScript**, **Tailwind CSS**, **Express**, **MongoDB**, and **Mongoose**.
 
-First, run the development server:
+## Features
+
+- Responsive homepage, account registration and login
+- Session-based authentication with HTTP-only cookies
+- Private energy readings (create, view, edit and delete)
+- Dashboard with usage and electricity cost summaries
+- Analytics, energy-saving recommendations, and searchable reports
+- CSV report export and print-friendly report view
+
+## Prerequisites
+
+- Node.js and npm compatible with Next.js 16
+- MongoDB running locally or a MongoDB Atlas connection string
+
+## Setup
+
+From the project folder:
+
+```bash
+npm install
+cd backend
+npm install
+cp .env.example .env
+```
+
+Edit `backend/.env` with your MongoDB connection string and a strong random `JWT_SECRET`. Never commit `.env` files or share credentials.
+
+## Run locally
+
+**Terminal 1 — API:**
+
+```bash
+cd backend
+npm run dev
+```
+
+**Terminal 2 — website (from project root):**
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Visit <http://localhost:3000>. The API is at <http://localhost:5001/api/health>.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+If you use a different backend address, create a `.env.local` at the project root with `NEXT_PUBLIC_API_URL=http://localhost:5001` adjusted to your URL. Restart the Next.js server after changing environment variables.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Commands
 
-## Learn More
+```bash
+npm run lint
+npm run build
+```
 
-To learn more about Next.js, take a look at the following resources:
+The backend also supports `npm run check` and `npm start` from the `backend` directory.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Routes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Page | Purpose |
+| --- | --- |
+| `/` | Landing page |
+| `/register` | Create account |
+| `/login` | Sign in |
+| `/dashboard` | Manage energy readings |
+| `/analytics` | Analyze consumption |
+| `/recommendations` | Energy-saving guidance |
+| `/reports` | Filter, print and export readings |
 
-## Deploy on Vercel
+## Notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The application stores real user accounts and energy readings in MongoDB. The ZIP **does not** include a database or secret configuration. Set up the database and `.env` before running the backend on a new machine.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+For public deployment, configure a secure HTTPS backend, allowed frontend origins, and appropriate cross-site cookie settings. The current configuration is intended for local development.

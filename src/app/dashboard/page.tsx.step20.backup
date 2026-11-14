@@ -1,0 +1,814 @@
+
+"use client";
+
+import { useRouter } from "next/navigation";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
+
+import SemsNavigation from "@/components/SemsNavigation";
+
+const API_URL = "http://localhost:5001";
+
+type User = {
+  id: string;
+  fullName: string;
+  email: string;
+  role: string;
+};
+
+type EnergyReading = {
+  _id: string;
+  readingDate: string;
+  consumptionKwh: number;
+  ratePerKwh: number;
+  totalCost: number;
+  notes: string;
+  createdAt: string;
+};
+
+type ReadingForm = {
+  readingDate: string;
+  consumptionKwh: string;
+  ratePerKwh: string;
+  notes: string;
+};
+
+function getToday() {
+  const now = new Date();
+  const local = new Date(
+    now.getTime() - now.getTimezoneOffset() * 60000
+  );
+  return local.toISOString().slice(0, 10);
+}
+
+function emptyForm(): ReadingForm {
+  return {
+    readingDate: getToday(),
+    consumptionKwh: "",
+    ratePerKwh: "",
+    notes: "",
+  };
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+  }).format(value);
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-CA", {
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatDate(value: string) {
+  return new Date(value).toLocaleDateString("en-CA", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+const inputStyle =
+  "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-[#082542] outline-none transition focus:border-[#49b51a] focus:ring-4 focus:ring-green-100";
+
+export default function DashboardPage() {
+  const router = useRouter();
+
+  const [user, setUser] = useState<User | null>(null);
+  const [readings, setReadings] = useState<EnergyReading[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  const [loadingReadings, setLoadingReadings] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const [form, setForm] = useState<ReadingForm>(emptyForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const loadReadings = useCallback(async () => {
+    setLoadingReadings(true);
+
+    try {
+      const response = await fetch(`${API_URL}/api/energy`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Unable to load energy readings."
+        );
+      }
+
+      setReadings(data.readings);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load energy readings."
+      );
+    } finally {
+      setLoadingReadings(false);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initializeDashboard() {
+      try {
+        const response = await fetch(`${API_URL}/api/auth/me`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (response.status === 401 || response.status === 403) {
+          router.replace("/login");
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error("Unable to verify your session.");
+        }
+
+        const data = await response.json();
+
+        if (!data.success || !data.user) {
+          router.replace("/login");
+          return;
+        }
+
+        if (!cancelled) {
+          setUser(data.user);
+          await loadReadings();
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setError(
+            error instanceof Error
+              ? error.message
+              : "Unable to connect to SEMS."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    initializeDashboard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router, loadReadings]);
+
+  const summary = useMemo(() => {
+    const totalConsumption = readings.reduce(
+      (sum, reading) => sum + reading.consumptionKwh,
+      0
+    );
+
+    const totalCost = readings.reduce(
+      (sum, reading) => sum + reading.totalCost,
+      0
+    );
+
+    const averageRate =
+      totalConsumption > 0
+        ? readings.reduce(
+            (sum, reading) =>
+              sum +
+              reading.consumptionKwh * reading.ratePerKwh,
+            0
+          ) / totalConsumption
+        : 0;
+
+    return {
+      totalConsumption,
+      totalCost,
+      averageRate,
+      recordCount: readings.length,
+    };
+  }, [readings]);
+
+  const chartReadings = useMemo(() => {
+    return [...readings]
+      .sort(
+        (a, b) =>
+          new Date(a.readingDate).getTime() -
+          new Date(b.readingDate).getTime()
+      )
+      .slice(-8);
+  }, [readings]);
+
+  const maxConsumption = Math.max(
+    1,
+    ...chartReadings.map((reading) => reading.consumptionKwh)
+  );
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (saving) return;
+
+    setError("");
+    setMessage("");
+
+    const consumptionKwh = Number(form.consumptionKwh);
+    const ratePerKwh = Number(form.ratePerKwh);
+
+    if (
+      !form.readingDate ||
+      form.consumptionKwh.trim() === "" ||
+      form.ratePerKwh.trim() === "" ||
+      !Number.isFinite(consumptionKwh) ||
+      !Number.isFinite(ratePerKwh) ||
+      consumptionKwh < 0 ||
+      ratePerKwh < 0
+    ) {
+      setError("Please enter valid energy reading information.");
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const url = editingId
+        ? `${API_URL}/api/energy/${editingId}`
+        : `${API_URL}/api/energy`;
+
+      const response = await fetch(url, {
+        method: editingId ? "PUT" : "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          readingDate: form.readingDate,
+          consumptionKwh,
+          ratePerKwh,
+          notes: form.notes,
+        }),
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Unable to save energy reading."
+        );
+      }
+
+      setMessage(
+        editingId
+          ? "Energy reading updated successfully."
+          : "Energy reading added successfully."
+      );
+
+      setEditingId(null);
+      setForm(emptyForm());
+
+      await loadReadings();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save energy reading."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleEdit(reading: EnergyReading) {
+    setEditingId(reading._id);
+
+    setForm({
+      readingDate: reading.readingDate.slice(0, 10),
+      consumptionKwh: String(reading.consumptionKwh),
+      ratePerKwh: String(reading.ratePerKwh),
+      notes: reading.notes || "",
+    });
+
+    setError("");
+    setMessage("");
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setForm(emptyForm());
+    setError("");
+  }
+
+  async function handleDelete(id: string) {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this energy reading?"
+    );
+
+    if (!confirmed) return;
+
+    setDeletingId(id);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await fetch(`${API_URL}/api/energy/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Unable to delete energy reading."
+        );
+      }
+
+      setMessage("Energy reading deleted successfully.");
+
+      if (editingId === id) {
+        cancelEdit();
+      }
+
+      await loadReadings();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete energy reading."
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f4f8fa]">
+        <p className="text-lg font-semibold text-[#082542]">
+          Loading your SEMS dashboard...
+        </p>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f4f8fa] px-5">
+        {error ? (
+          <div className="rounded-2xl bg-white p-8 text-center shadow-sm">
+            <p className="text-red-700">{error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-5 rounded-xl bg-[#4bbd0b] px-6 py-3 font-semibold text-white"
+            >
+              Try Again
+            </button>
+          </div>
+        ) : (
+          <p className="text-slate-600">Redirecting to Sign In...</p>
+        )}
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-[#f4f8fa]">
+      {/* Dashboard header */}
+      <SemsNavigation />
+
+      <div className="mx-auto max-w-7xl px-5 py-10 md:px-10">
+        {/* Welcome banner */}
+        <section className="rounded-[28px] bg-[#052b47] p-8 text-white md:p-12">
+          <span className="text-sm font-bold uppercase tracking-widest text-[#a6f16b]">
+            SEMS Energy Dashboard
+          </span>
+
+          <h1 className="mt-5 text-3xl font-extrabold md:text-4xl">
+            Welcome back, {user.fullName}!
+          </h1>
+
+          <p className="mt-4 max-w-2xl text-white/80">
+            Track your electricity consumption, monitor energy
+            costs, and make smarter energy decisions.
+          </p>
+        </section>
+
+        {/* Notifications */}
+        {error && (
+          <p
+            role="alert"
+            className="mt-6 rounded-xl bg-red-50 px-5 py-4 text-sm text-red-700"
+          >
+            {error}
+          </p>
+        )}
+
+        {message && (
+          <p
+            role="status"
+            className="mt-6 rounded-xl bg-green-50 px-5 py-4 text-sm text-green-800"
+          >
+            ✓ {message}
+          </p>
+        )}
+
+        {/* Summary cards */}
+        <section className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">
+              Total Consumption
+            </p>
+            <p className="mt-3 text-3xl font-extrabold text-[#082542]">
+              {formatNumber(summary.totalConsumption)}
+              <span className="ml-2 text-sm font-medium text-slate-500">
+                kWh
+              </span>
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">
+              Total Energy Cost
+            </p>
+            <p className="mt-3 text-3xl font-extrabold text-[#082542]">
+              {formatMoney(summary.totalCost)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">
+              Average Energy Rate
+            </p>
+            <p className="mt-3 text-3xl font-extrabold text-[#082542]">
+              {formatMoney(summary.averageRate)}
+              <span className="ml-2 text-sm font-medium text-slate-500">
+                /kWh
+              </span>
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-slate-500">
+              Total Records
+            </p>
+            <p className="mt-3 text-3xl font-extrabold text-[#082542]">
+              {summary.recordCount}
+            </p>
+          </div>
+        </section>
+
+        {/* Add / Edit energy reading */}
+        <section className="mt-8 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm md:p-8">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-[#082542]">
+              {editingId
+                ? "Edit Energy Reading"
+                : "Add Energy Reading"}
+            </h2>
+
+            <p className="mt-2 text-sm text-slate-500">
+              Enter your electricity consumption and rate.
+              SEMS will automatically calculate the energy cost.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="grid gap-5 md:grid-cols-3">
+              <div>
+                <label
+                  htmlFor="readingDate"
+                  className="mb-2 block text-sm font-semibold text-[#082542]"
+                >
+                  Reading Date
+                </label>
+
+                <input
+                  id="readingDate"
+                  type="date"
+                  value={form.readingDate}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      readingDate: event.target.value,
+                    })
+                  }
+                  className={inputStyle}
+                  required
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="consumptionKwh"
+                  className="mb-2 block text-sm font-semibold text-[#082542]"
+                >
+                  Consumption (kWh)
+                </label>
+
+                <input
+                  id="consumptionKwh"
+                  type="number"
+                  min="0"
+                  max="1000000"
+                  step="any"
+                  placeholder="Example: 250"
+                  value={form.consumptionKwh}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      consumptionKwh: event.target.value,
+                    })
+                  }
+                  className={inputStyle}
+                  required
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="ratePerKwh"
+                  className="mb-2 block text-sm font-semibold text-[#082542]"
+                >
+                  Electricity Rate ($/kWh)
+                </label>
+
+                <input
+                  id="ratePerKwh"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="any"
+                  placeholder="Example: 0.15"
+                  value={form.ratePerKwh}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      ratePerKwh: event.target.value,
+                    })
+                  }
+                  className={inputStyle}
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="notes"
+                className="mb-2 block text-sm font-semibold text-[#082542]"
+              >
+                Notes (Optional)
+              </label>
+
+              <textarea
+                id="notes"
+                rows={3}
+                maxLength={500}
+                placeholder="Example: Monthly electricity usage"
+                value={form.notes}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    notes: event.target.value,
+                  })
+                }
+                className={inputStyle}
+              />
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="submit"
+                disabled={saving}
+                className="rounded-xl bg-[#4bbd0b] px-7 py-3.5 text-sm font-bold text-white transition hover:bg-[#399a08] disabled:opacity-60"
+              >
+                {saving
+                  ? "Saving..."
+                  : editingId
+                    ? "Update Reading"
+                    : "Add Reading"}
+              </button>
+
+              {editingId && (
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  className="rounded-xl border border-slate-200 px-7 py-3.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel Edit
+                </button>
+              )}
+            </div>
+          </form>
+        </section>
+
+        {/* Energy consumption chart */}
+        <section className="mt-8 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm md:p-8">
+          <h2 className="text-2xl font-bold text-[#082542]">
+            Energy Consumption Chart
+          </h2>
+
+          <p className="mt-2 text-sm text-slate-500">
+            Your latest eight electricity readings.
+          </p>
+
+          {chartReadings.length === 0 ? (
+            <p className="mt-8 rounded-xl bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
+              No energy data available yet. Add your first reading
+              to display the chart.
+            </p>
+          ) : (
+            <div className="mt-8 overflow-x-auto">
+              <div className="flex min-w-[480px] items-end gap-4 border-b border-slate-200 pb-4">
+                {chartReadings.map((reading) => (
+                  <div
+                    key={reading._id}
+                    className="flex min-w-0 flex-1 flex-col items-center"
+                  >
+                    <span className="mb-2 text-xs font-semibold text-[#082542]">
+                      {formatNumber(reading.consumptionKwh)}
+                    </span>
+
+                    <div className="flex h-52 w-full items-end justify-center">
+                      <div
+                        title={`${formatNumber(reading.consumptionKwh)} kWh`}
+                        className="w-full max-w-14 rounded-t-lg bg-[#4bbd0b] transition-all"
+                        style={{
+                          height: `${
+                            (reading.consumptionKwh /
+                              maxConsumption) *
+                            100
+                          }%`,
+                          minHeight:
+                            reading.consumptionKwh > 0
+                              ? "4px"
+                              : "0px",
+                        }}
+                      />
+                    </div>
+
+                    <span className="mt-3 text-center text-xs text-slate-500">
+                      {formatDate(reading.readingDate)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Energy records table */}
+        <section className="mt-8 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm md:p-8">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-bold text-[#082542]">
+                Energy Reading History
+              </h2>
+
+              <p className="mt-2 text-sm text-slate-500">
+                View, edit, or delete your electricity records.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={loadReadings}
+              disabled={loadingReadings}
+              className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-[#082542] hover:bg-slate-50 disabled:opacity-60"
+            >
+              {loadingReadings ? "Refreshing..." : "Refresh Records"}
+            </button>
+          </div>
+
+          {readings.length === 0 ? (
+            <p className="mt-8 rounded-xl bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
+              No energy readings found. Add your first reading above.
+            </p>
+          ) : (
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500">
+                    <th className="px-4 py-4 font-semibold">
+                      Date
+                    </th>
+                    <th className="px-4 py-4 font-semibold">
+                      Consumption
+                    </th>
+                    <th className="px-4 py-4 font-semibold">
+                      Rate
+                    </th>
+                    <th className="px-4 py-4 font-semibold">
+                      Total Cost
+                    </th>
+                    <th className="px-4 py-4 font-semibold">
+                      Notes
+                    </th>
+                    <th className="px-4 py-4 font-semibold">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {readings.map((reading) => (
+                    <tr
+                      key={reading._id}
+                      className="border-b border-slate-100"
+                    >
+                      <td className="px-4 py-4 text-[#082542]">
+                        {formatDate(reading.readingDate)}
+                      </td>
+
+                      <td className="px-4 py-4">
+                        {formatNumber(reading.consumptionKwh)} kWh
+                      </td>
+
+                      <td className="px-4 py-4">
+                        {formatMoney(reading.ratePerKwh)}
+                      </td>
+
+                      <td className="px-4 py-4 font-semibold text-[#082542]">
+                        {formatMoney(reading.totalCost)}
+                      </td>
+
+                      <td className="max-w-[200px] break-words px-4 py-4 text-slate-600">
+                        {reading.notes || "—"}
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <div className="flex gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(reading)}
+                            className="font-semibold text-[#328c19] hover:underline"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(reading._id)}
+                            disabled={deletingId === reading._id}
+                            className="font-semibold text-red-600 hover:underline disabled:opacity-50"
+                          >
+                            {deletingId === reading._id
+                              ? "Deleting..."
+                              : "Delete"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <p className="mt-10 text-center text-xs text-slate-400">
+          SEMS — Smart Energy Management System
+        </p>
+      </div>
+    </main>
+  );
+}

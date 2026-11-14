@@ -12,7 +12,7 @@ import {
 
 import SemsNavigation from "@/components/SemsNavigation";
 
-const API_URL = "http://localhost:5001";
+import { API_URL } from "@/lib/api";
 
 type User = {
   id: string;

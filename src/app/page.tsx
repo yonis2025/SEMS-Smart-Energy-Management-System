@@ -318,7 +318,7 @@ export default function Home() {
       </section>
 
       <footer className="bg-[#041e31] px-5 py-8 text-center text-sm text-white/60">
-        © {new Date().getFullYear()} SEMS — Smart Energy Management System.
+        © 2026 SEMS — Smart Energy Management System.
         Built for COMP229 Web Application Development.
       </footer>
     </main>

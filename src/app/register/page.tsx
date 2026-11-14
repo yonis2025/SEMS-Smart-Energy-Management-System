@@ -1,6 +1,8 @@
 
 "use client";
 
+import { API_URL } from "@/lib/api";
+
 import Image from "next/image";
 import Link from "next/link";
 import { useState, type ChangeEvent, type FormEvent } from "react";
@@ -68,7 +70,7 @@ export default function RegisterPage() {
 
     try {
       const response = await fetch(
-        "http://127.0.0.1:5001/api/auth/register",
+        `${API_URL}/api/auth/register`,
         {
           method: "POST",
           headers: {

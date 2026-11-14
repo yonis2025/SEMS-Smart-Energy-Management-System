@@ -6,7 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
-const API_URL = "http://localhost:5001";
+import { API_URL } from "@/lib/api";
 
 const navigationItems = [
   { name: "Dashboard", href: "/dashboard" },

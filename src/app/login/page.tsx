@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
-const API_URL = "http://localhost:5001";
+import { API_URL } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
